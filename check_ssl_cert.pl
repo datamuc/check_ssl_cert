@@ -6,7 +6,6 @@ use Net::SSLeay qw(die_now die_if_ssl_error) ;
 use Monitoring::Plugin;
 use Data::Dumper;
 use POSIX qw/strftime/;
-use Try::Tiny;
 $Data::Dumper::Indent = 1;
 $Data::Dumper::Sortkeys = 1;
 use Date::Parse;
@@ -25,7 +24,7 @@ $SIG{ALRM} = sub {
 sub main {
     my $np = Monitoring::Plugin->new( shortname => 'CERT', usage=>'' );
     $np->add_arg( spec => 'host|H=s', required => 1, help=>'' );
-    $np->add_arg( spec => 'port|p=i' , required => 1, help=>'');
+    $np->add_arg( spec => 'port|p=i' , required => 1, help=>'', default=>443);
     $np->add_arg(
         spec => 'capath|P=s',
         default => '/etc/ssl/certs/ca-certificates.crt',
@@ -40,10 +39,10 @@ sub main {
     alarm($np->opts->timeout);
 
     my $data;
-    try {
-        $data = collect($np);
-    } catch {
-        $np->nagios_die($_);
+    eval {
+        $data = collect($np); 1
+    } or do {
+        $np->nagios_die($@);
     };
 
     check($np, $data); # this doesn't return
