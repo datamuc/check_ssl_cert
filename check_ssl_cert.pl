@@ -43,6 +43,7 @@ sub main {
     $np->add_arg( spec => 'host|H=s', required => 1, help=>'' );
     $np->add_arg( spec => 'port|p=i' , required => 1, help=>'', default=>443);
     $np->add_arg( spec => 'sni=s' , required => 0, help=>'server name indication, defaults to --host');
+    $np->add_arg( spec => 'starttls=s' , required => 0, help=>'perform starttls, currently only "smtp" is supported');
     $np->add_arg(
         spec => 'capath|P=s',
         default => '/etc/ssl/certs/ca-certificates.crt',
@@ -169,8 +170,29 @@ sub collect {
          and die_if_ssl_error("ssl ctx set options");
     my $ssl = Net::SSLeay::new($ctx) or nagios_die("Failed to create SSL $!");
 
-    Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $np->opts->host );
+    if ($np->opts->starttls eq "smtp") {
+        require Net::Domain;
+        my $hostname = Net::Domain::hostfqdn();
+        while(defined(my $line = <$s>)) {
+            if($line =~ /^\d+ /) {
+                last;
+            }
+        }
+        $s->write("EHLO $hostname\r\n");
+        while(defined(my $line = <$s>)) {
+            if($line =~ /^\d+ /) {
+                last;
+            }
+        }
+        $s->write("STARTTLS\r\n");
+        while(defined(my $line = <$s>)) {
+            if($line =~ /^\d+ /) {
+                last;
+            }
+        }
+    }
 
+    Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $np->opts->host );
     Net::SSLeay::set_verify ($ssl, &Net::SSLeay::VERIFY_PEER, $verify);
     Net::SSLeay::set_fd($ssl, fileno($s));   # Must use fileno
     my $res = Net::SSLeay::connect($ssl) and die_if_ssl_error("ssl connect");
@@ -189,6 +211,10 @@ sub collect {
             Net::SSLeay::X509_get_notAfter($peer)),
     };
     $data->{peer}->{notAfter} = str2time($data->{peer}->{notAfterStr});
+
+    if ($np->opts->starttls eq "smtp") {
+        Net::SSLeay::ssl_write_CRLF($ssl, 'QUIT');
+    }
 
     return $data;
 }
