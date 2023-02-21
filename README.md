@@ -14,3 +14,7 @@ Exits CRITICAL if the verification fails, i. e. the chain does not go back to an
 of the certificates in the bundle or a certificate in the chain has expired.
 
 No host name verification is done.
+
+## Bugtracker
+
+<https://codeberg.org/data/check_ssl_cert/issues>
