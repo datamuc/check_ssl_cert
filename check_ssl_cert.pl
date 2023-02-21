@@ -41,6 +41,7 @@ sub main {
     my $np = Monitoring::Plugin->new( shortname => 'CERT', usage=>'' );
     $np->add_arg( spec => 'host|H=s', required => 1, help=>'' );
     $np->add_arg( spec => 'port|p=i' , required => 1, help=>'', default=>443);
+    $np->add_arg( spec => 'sni=s' , required => 0, help=>'server name indication, defaults to --host');
     $np->add_arg(
         spec => 'capath|P=s',
         default => '/etc/ssl/certs/ca-certificates.crt',
@@ -163,6 +164,8 @@ sub collect {
     Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL)
          and die_if_ssl_error("ssl ctx set options");
     $ssl = Net::SSLeay::new($ctx) or nagios_die("Failed to create SSL $!");
+
+    Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $dest_serv );
 
     Net::SSLeay::set_verify ($ssl, Net::SSLeay::VERIFY_PEER, $verify);
     Net::SSLeay::set_fd($ssl, fileno($s));   # Must use fileno
