@@ -26,7 +26,7 @@ use POSIX qw/strftime/;
 $Data::Dumper::Indent = 1;
 $Data::Dumper::Sortkeys = 1;
 use Date::Parse;
-use 5.10.0;
+use 5.20.0;
 
 # Setup SSLeay
 Net::SSLeay::load_error_strings();
