@@ -17,7 +17,8 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-use Socket;
+use Socket qw/getnameinfo/;
+use IO::Socket::IP;
 use Net::SSLeay qw(die_now die_if_ssl_error) ;
 use Monitoring::Plugin;
 use Data::Dumper;
@@ -147,13 +148,12 @@ sub collect {
     };
 
     # set up connection
-    ($dest_serv, $port) = ($np->opts->host, $np->opts->port);
-    $dest_ip = gethostbyname ($dest_serv);
-    $dest_serv_params  = sockaddr_in($port, $dest_ip);
-    socket  (my $s, &AF_INET, &SOCK_STREAM, 0)  or die "socket: $!";
-    connect ($s, $dest_serv_params)             or die "connect: $!";
-    select  ($s); $| = 1; select (STDOUT);      # Eliminate STDIO buffering
-
+    $s = IO::Socket::IP->new(
+        PeerAddr => $np->opts->host,
+        PeerPort => $np->opts->port,
+        Type     => SOCK_STREAM,
+        Proto    => 'tcp'
+    );
     # setup ssl and collect data
     $ctx = Net::SSLeay::CTX_new() or nagios_die("Failed to create SSL_CTX $!");
 
@@ -165,7 +165,7 @@ sub collect {
          and die_if_ssl_error("ssl ctx set options");
     $ssl = Net::SSLeay::new($ctx) or nagios_die("Failed to create SSL $!");
 
-    Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $dest_serv );
+    Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $np->opts->host );
 
     Net::SSLeay::set_verify ($ssl, Net::SSLeay::VERIFY_PEER, $verify);
     Net::SSLeay::set_fd($ssl, fileno($s));   # Must use fileno
