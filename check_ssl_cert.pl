@@ -17,7 +17,8 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-use Socket;
+use Socket qw/getnameinfo/;
+use IO::Socket::IP;
 use Net::SSLeay qw(die_now die_if_ssl_error) ;
 use Monitoring::Plugin;
 use Data::Dumper;
@@ -25,7 +26,7 @@ use POSIX qw/strftime/;
 $Data::Dumper::Indent = 1;
 $Data::Dumper::Sortkeys = 1;
 use Date::Parse;
-use 5.10.0;
+use 5.20.0;
 
 # Setup SSLeay
 Net::SSLeay::load_error_strings();
@@ -118,7 +119,11 @@ sub collect {
 
     my $verify = sub {
         my ($ok, $ctx_store) = @_;
-        my ($certname,$cert,$error, $notAfter, $notAfterStr);
+        my (
+            $certname, $cert, $error,
+            $notAfter, $notAfterStr, $issuer,
+            $subject, $verifyError
+        );
         if ($ctx_store) {
             $cert = Net::SSLeay::X509_STORE_CTX_get_current_cert($ctx_store);
             $error = Net::SSLeay::X509_STORE_CTX_get_error($ctx_store);
@@ -147,15 +152,14 @@ sub collect {
     };
 
     # set up connection
-    ($dest_serv, $port) = ($np->opts->host, $np->opts->port);
-    $dest_ip = gethostbyname ($dest_serv);
-    $dest_serv_params  = sockaddr_in($port, $dest_ip);
-    socket  (my $s, &AF_INET, &SOCK_STREAM, 0)  or die "socket: $!";
-    connect ($s, $dest_serv_params)             or die "connect: $!";
-    select  ($s); $| = 1; select (STDOUT);      # Eliminate STDIO buffering
-
+    my $s = IO::Socket::IP->new(
+        PeerAddr => $np->opts->host,
+        PeerPort => $np->opts->port,
+        Type     => SOCK_STREAM,
+        Proto    => 'tcp'
+    );
     # setup ssl and collect data
-    $ctx = Net::SSLeay::CTX_new() or nagios_die("Failed to create SSL_CTX $!");
+    my $ctx = Net::SSLeay::CTX_new() or nagios_die("Failed to create SSL_CTX $!");
 
     my $ca = $np->opts->capath;
     my @ca_paths = -d $ca ? ('',$ca) : ($ca,'');
@@ -163,13 +167,13 @@ sub collect {
 
     Net::SSLeay::CTX_set_options($ctx, &Net::SSLeay::OP_ALL)
          and die_if_ssl_error("ssl ctx set options");
-    $ssl = Net::SSLeay::new($ctx) or nagios_die("Failed to create SSL $!");
+    my $ssl = Net::SSLeay::new($ctx) or nagios_die("Failed to create SSL $!");
 
-    Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $dest_serv );
+    Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $np->opts->host );
 
-    Net::SSLeay::set_verify ($ssl, Net::SSLeay::VERIFY_PEER, $verify);
+    Net::SSLeay::set_verify ($ssl, &Net::SSLeay::VERIFY_PEER, $verify);
     Net::SSLeay::set_fd($ssl, fileno($s));   # Must use fileno
-    $res = Net::SSLeay::connect($ssl) and die_if_ssl_error("ssl connect");
+    my $res = Net::SSLeay::connect($ssl) and die_if_ssl_error("ssl connect");
 
     $data->{cipher}=Net::SSLeay::get_cipher($ssl);
     $data->{verify_success}=$verify_success;
