@@ -44,6 +44,7 @@ sub main {
     $np->add_arg( spec => 'port|p=i' , required => 1, help=>'', default=>443);
     $np->add_arg( spec => 'sni=s' , required => 0, help=>'server name indication, defaults to --host');
     $np->add_arg( spec => 'starttls=s' , required => 0, help=>'perform starttls, currently only "smtp" is supported');
+    $np->add_arg( spec => 'name=s' , required => 0, help=>'client hostname to use in handshakes (EHLO, etc)');
     $np->add_arg(
         spec => 'capath|P=s',
         default => '/etc/ssl/certs/ca-certificates.crt',
@@ -113,6 +114,34 @@ sub check {
     );
 }
 
+sub smtp_starttls {
+    my $np = shift;
+    my $s = shift;
+    require Net::Domain;
+    my $hostname = $np->opts->name or Net::Domain::hostfqdn();
+    my $read_response = sub {
+        while(defined(my $line = <$s>)) {
+            if($line !~ /\A\d+[- ]/) {
+                die("protocol error: $line")
+            }
+
+            if($line !~ /\A2/) {
+                die("protocol error: $line")
+            }
+
+            if($line =~ /\A2.. /) {
+                last;
+            }
+        }
+    };
+
+    $read_response->();
+    $s->write("EHLO $hostname\r\n");
+    $read_response->();
+    $s->write("STARTTLS\r\n");
+    $read_response->();
+}
+
 sub collect {
     my $np = shift;
     my $data = {};
@@ -138,10 +167,9 @@ sub collect {
                 Net::SSLeay::X509_get_notAfter($cert));
             $notAfter = str2time($notAfterStr);
         }
-        push @{ $data->{verification_messages} }, {
+        unshift @{ $data->{verification_messages} }, {
             error=>$error,
             ok=>$ok,
-            cert=>$cert,
             subject=>$subject,
             issuer=>$issuer,
             notAfter=>$notAfter,
@@ -171,25 +199,7 @@ sub collect {
     my $ssl = Net::SSLeay::new($ctx) or nagios_die("Failed to create SSL $!");
 
     if ($np->opts->starttls eq "smtp") {
-        require Net::Domain;
-        my $hostname = Net::Domain::hostfqdn();
-        while(defined(my $line = <$s>)) {
-            if($line =~ /^\d+ /) {
-                last;
-            }
-        }
-        $s->write("EHLO $hostname\r\n");
-        while(defined(my $line = <$s>)) {
-            if($line =~ /^\d+ /) {
-                last;
-            }
-        }
-        $s->write("STARTTLS\r\n");
-        while(defined(my $line = <$s>)) {
-            if($line =~ /^\d+ /) {
-                last;
-            }
-        }
+        smtp_starttls($np, $s);
     }
 
     Net::SSLeay::set_tlsext_host_name($ssl, $np->opts->sni // $np->opts->host );
